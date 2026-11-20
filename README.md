@@ -13,10 +13,10 @@
 * Conversion to and from CIE xyY, CIE XYZ, and CIE Lab
 * Chromatic adaptation in XYZ space between different white points
 * Extracting metadata (including ICC profile) from PNG, JPEG, and WebP files
+* Writing ICC profiles into PNG and JPEG files, preserving pixels and unrelated metadata
 
 Still missing:
 
-* Embedding of tagged colour profiles in image
 * Exposing colour data from ICC profiles (to enable conversions between arbitrary profiles)
 * Rendering intent support
 * CMYK support
@@ -113,6 +113,32 @@ description, err := iccProfile.Description()  // eg. "sRGB IEC61966-2.1"
 If no profile exists, `nil` is returned without an error.
 
 `autometa.Load` delegates to format-specific loaders like `jpegmeta.Load` and `pngmeta.Load`; these can be used instead if you know the format of image.
+
+
+### ICC profile writing
+
+An image that has been colour-corrected into a non-sRGB encoding needs to carry the profile it was actually encoded in, otherwise other software will interpret it as sRGB and the colours will shift. [`prism.WriteICCProfile`](https://pkg.go.dev/github.com/mandykoh/prism#WriteICCProfile) copies an encoded PNG or JPEG stream, embedding a caller-supplied ICC profile:
+
+```go
+outFile, err := os.Create("output.png")
+if err != nil {
+    panic(err)
+}
+defer outFile.Close()
+
+profileData, err := os.ReadFile("DisplayP3.icc")
+if err != nil {
+    panic(err)
+}
+
+if err := prism.WriteICCProfile(outFile, inFile, profileData); err != nil {
+    panic(err)
+}
+```
+
+The image format is detected from the stream. Pixel data and unrelated metadata (EXIF, XMP, JFIF, and other chunks or segments) are copied unchanged, so the decoded image is identical to the source, and reading the profile back yields exactly the bytes that were supplied.
+
+For PNG, the profile is stored in an `iCCP` chunk (zlib-compressed, as the specification requires). Profiles can span multiple JPEG `APP2` segments when too large for one; the writer splits and numbers them automatically, and replaces any existing profile. Because an embedded profile supersedes an implicit colour space declaration, existing PNG `sRGB`, `gAMA`, and `cHRM` chunks are removed; callers who need to make that choice explicitly can use [`autometa.WriteICCProfileWithOptions`](https://pkg.go.dev/github.com/mandykoh/prism/meta/autometa#WriteICCProfileWithOptions) or the format-specific writers in `pngmeta` and `jpegmeta` to reject the conflict instead.
 
 
 ### Colour linearisation
